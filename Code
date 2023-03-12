@@ -1,0 +1,138 @@
+#include <LiquidCrystal_I2C.h>
+LiquidCrystal_I2C lcd(0x27, 20, 4);
+
+const int potentiometer = A0;       // potentiometer (10 k variable resistor)
+const int bt_stop = A1;             // stop button stop motor
+const int bt_CW = A2;               // direction button for drive gear - clockwise (CW) --> filament feed backward
+const int bt_CCW = A3;              // direction button for drive gear - counterclockwise (CCW) --> filament feed forward
+
+int enablepin = 9;                  // enable pin out to DM556T
+int pulse = 2;                      // pulse out pin to DM556T
+int dir_out = 3;                    // direction pin out to DM556T
+int led_stop = 13;                  // red led for stop
+int led_backward = 12;              // blue led for filament feed backward
+int led_forward = 11;               // green led for filament feed forward
+
+int enableout;                      // sets motor off to start
+int speedpulse;                     // pulse delay for speed management
+unsigned long strpm = 0;            // start-time for rpm count
+unsigned long ftrpm = 0;            // final-time for rpm count
+int loops = 0;                      // counter for loop cycles to use for rpm
+int rpm = 0;                        // rpm
+const int setpulse = 400;           // set to pulse setting on DM556T ***check with the set steps of DM556T (switch seetings on DM556T)
+int Mode = 0;                       // Mode 0 when you turn on feeding unit 
+
+void setup() {
+
+  Serial.begin(9600);                   // send and receive at 9600 baud
+
+  pinMode(potentiometer, INPUT);        // define potentiometer as input
+  pinMode(bt_stop, INPUT_PULLUP);       // start button enables motor to run
+  pinMode(bt_CW, INPUT_PULLUP);         // button takes pin low, otherwise pin is high due to pullup
+  pinMode(bt_CCW, INPUT_PULLUP);        // button takes pin low, otherwise pin is high due to pullup
+  
+  pinMode (pulse, OUTPUT);              // pulse to DM556T
+  pinMode (dir_out, OUTPUT);            // direction to DM556T (clockwise --> filament feed backward | counterclockwise --> filament feed forward)
+  pinMode (enablepin, OUTPUT);          //high to controller to enable
+
+  lcd.init();
+  lcd.backlight();  
+  lcd.setCursor(0, 0);
+  lcd.print("        IFKB        ");
+  lcd.setCursor(0, 2);
+  lcd.print("  ceramik filament  ");
+  lcd.setCursor(0, 3);
+  lcd.print("    feeding unit    ");
+  delay(3000);                          // wait 3 s to read text
+  lcd.clear();
+    
+  loops = 0;                            //sets completed loops to 0
+
+}
+
+
+void loop() {
+
+  if(digitalRead (bt_stop == 0)){Mode = 0;}       // for stop
+  if(digitalRead (bt_CW == 0)){Mode = 1;}         // for filament feed backward 
+  if(digitalRead (bt_CCW == 0)){Mode = 2;}        // for filament feed forward
+
+  displaydatastart();
+  
+  if (Mode == 1 || Mode == 2) {                 // if CW or CCW on, start loop
+    ++loops;                                    //increments counter for loops
+  }
+  
+  if(loops == 1)  {                             // gets time of first loop
+    strpm = micros();                           // sets the time of the start
+  }
+  else if(loops == setpulse) {                  // checks to see if the number of loops equals the number of steps on DM556T
+    ftrpm = micros();                           // gets final-time for rpm calculation
+    loops = 0;                                  // resets loops counter
+    displaydata();                              // goes to display data function
+  }
+
+  if(Mode == 1)  {                              
+    digitalWrite(dir_out, LOW);                 // sets direction CW to DM556T
+    digitalWrite(led_stop, LOW);                // led stop: off
+    digitalWrite(led_backward, HIGH);           // led backward: on
+    digitalWrite(led_forward, LOW);             // led forward: off
+  }
+  if(Mode == 2)  {
+    digitalWrite(dir_out, HIGH);                // sets direction CCW to DM556T
+    digitalWrite(led_stop, LOW);                // led stop: off
+    digitalWrite(led_backward, LOW);            // led backward: off
+    digitalWrite(led_forward, HIGH);            // led forward: on
+  }
+  if (Mode == 1 || Mode == 2) {                 // if CW or CCW on, enable DM556T
+    digitalWrite(enablepin, LOW);               // enables motor
+  }
+  if (Mode == 0) {
+    digitalWrite(enablepin, HIGH);              // disable DMT556T
+    digitalWrite(led_stop, HIGH);               // led stop: on
+    digitalWrite(led_backward, LOW);            // led backward: off
+    digitalWrite(led_forward, LOW);             // led forward: off
+  }
+
+  speedpulse = analogRead (potentiometer);              //reads speed pot
+  speedpulse = map (speedpulse, 0, 1023, 10, 16000);    //converts pot to speed delays max is 16383
+  
+  if (speedpulse < 0) {
+  digitalWrite (pulse, HIGH);                   // pulses motor
+  delayMicroseconds(100);                       // 100 ms pulse delay
+  digitalWrite (pulse, LOW);                    // pulses motor off
+  delayMicroseconds(speedpulse);                // delay
+  }
+}
+
+void displaydatastart() {
+
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("filament feed: ");
+  lcd.setCursor(0, 1);
+  lcd.print("STOP"); 
+
+  digitalWrite(enablepin, HIGH);              // disable DMT556T
+  digitalWrite(led_stop, HIGH);               // led stop: on
+  digitalWrite(led_backward, LOW);            // led backward: off
+  digitalWrite(led_forward, LOW);             // led forward: off 
+}
+
+void displaydata() {                    // function to display data
+
+  rpm = 60000 / (ftrpm - strpm);        // converting numbers to minute values
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("feed: ");
+  if(Mode == 0){ lcd.print("STOP");}
+  if(Mode == 1){ lcd.print("BACKWARD");}
+  if(Mode == 2){ lcd.print("FORWARD");}
+  lcd.setCursor(0, 2);
+  lcd.print("RPM: ");
+  lcd.print(rpm);
+  lcd.setCursor(0, 3);
+  lcd.print("Speed: ");
+  lcd.print(rpm * 0.09424777961);        // filament feed roller radius: r = 0.015 m --> scobe = 2*pi*r = 0.09242777961
+  lcd.print(" m/min");
+}
